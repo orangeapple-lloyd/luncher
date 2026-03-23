@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>今天要吃什麼？</title>
+    <!-- 引入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Noto Sans TC', sans-serif;
+            background-image: radial-gradient(circle at top right, #ffecd2 0%, #fcb69f 100%);
+            overflow-x: hidden;
+        }
+        
+        .wheel-container {
+            filter: drop-shadow(0 20px 25px rgba(0, 0, 0, 0.15));
+        }
+
+        .spin-btn {
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06), inset 0 -4px 0 rgba(0,0,0,0.1);
+            transition: all 0.1s;
+        }
+        
+        .spin-btn:active {
+            transform: translate(-50%, -45%);
+            box-shadow: 0 0px 0px 0px rgba(0, 0, 0, 0.1), inset 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .spin-btn:disabled {
+            background-color: #f3f4f6;
+            color: #9ca3af;
+            border-color: #e5e7eb;
+            cursor: not-allowed;
+            transform: translate(-50%, -50%);
+            box-shadow: none;
+        }
+
+        /* 慶祝紙片動畫 */
+        .confetti {
+            position: fixed;
+            z-index: 1000;
+            pointer-events: none;
+            will-change: transform, opacity;
+        }
+
+        /* 彈出視窗動畫 */
+        @keyframes popIn {
+            0% { transform: scale(0.8); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        .modal-animate {
+            animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+
+        /* 隱藏滾動條但保持可以滾動 */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4 sm:p-8">
+
+    <div class="max-w-5xl w-full flex flex-col lg:flex-row gap-8 items-center lg:items-start justify-center">
+        
+        <!-- 左側：轉盤區 -->
+        <div class="relative w-full max-w-md flex flex-col items-center">
+            <h1 class="text-4xl font-black text-gray-800 mb-8 tracking-wider text-center drop-shadow-sm lg:hidden">今天要吃什麼？</h1>
+            
+            <div class="relative w-full aspect-square wheel-container">
+                <!-- 指針 (上方) -->
+                <div class="absolute -top-4 left-1/2 -translate-x-1/2 z-20">
+                    <svg width="40" height="40" viewBox="0 0 24 24" fill="#ef4444" class="drop-shadow-md">
+                        <path d="M12 2L2 22h20L12 2z" transform="rotate(180 12 12)"/>
+                    </svg>
+                </div>
+                
+                <!-- 轉盤 Canvas -->
+                <canvas id="wheelCanvas" class="w-full h-full rounded-full bg-white"></canvas>
+                
+                <!-- 中間旋轉按鈕 -->
+                <button id="spinBtn" class="spin-btn absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-24 h-24 bg-white rounded-full font-black text-2xl text-orange-500 border-4 border-orange-100 flex items-center justify-center z-10 hover:scale-105 hover:text-orange-600 focus:outline-none">
+                    轉!
+                </button>
+            </div>
+        </div>
+
+        <!-- 右側：控制區 -->
+        <div class="w-full max-w-md bg-white/80 backdrop-blur-lg p-6 sm:p-8 rounded-3xl shadow-xl border border-white/50">
+            <h1 class="hidden lg:block text-3xl font-black text-gray-800 mb-6 tracking-wide drop-shadow-sm">今天要吃什麼？</h1>
+            
+            <div class="mb-6">
+                <label class="block text-gray-700 font-bold mb-2 text-sm">新增想吃的選項</label>
+                <div class="flex gap-2">
+                    <input type="text" id="itemInput" maxlength="15" placeholder="例如：麥當勞、拉麵..." class="flex-1 border-2 border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 transition-colors">
+                    <button id="addBtn" class="bg-orange-500 hover:bg-orange-600 text-white font-bold px-6 py-3 rounded-xl shadow-md transition-colors active:scale-95">
+                        加入
+                    </button>
+                </div>
+            </div>
+
+            <div class="flex justify-between items-center mb-3">
+                <h2 class="text-gray-700 font-bold">選項清單 (<span id="itemCount">0</span>)</h2>
+                <button id="resetBtn" class="text-sm text-red-500 hover:text-red-700 font-medium transition-colors">重置預設</button>
+            </div>
+            
+            <ul id="itemList" class="space-y-2 max-h-[40vh] overflow-y-auto no-scrollbar pr-2 pb-2">
+                <!-- 列表項目會透過 JS 動態產生 -->
+            </ul>
+        </div>
+    </div>
+
+    <!-- 結果彈出視窗 (Modal) -->
+    <div id="resultModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4 opacity-0 transition-opacity duration-300">
+        <div class="bg-white rounded-3xl p-8 max-w-sm w-full shadow-2xl text-center transform scale-90 transition-transform duration-300 relative overflow-hidden" id="modalContent">
+            <div class="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-orange-400 to-red-500"></div>
+            <p class="text-gray-500 font-bold mb-2">天意決定今天吃：</p>
+            <h2 id="resultText" class="text-4xl font-black text-gray-800 mb-8 py-4"></h2>
+            <button id="closeModalBtn" class="w-full bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white font-bold py-3 px-6 rounded-xl shadow-lg transform transition active:scale-95 focus:outline-none">
+                太棒了！就吃這個
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // DOM 元素
+        const canvas = document.getElementById('wheelCanvas');
+        const ctx = canvas.getContext('2d');
+        const spinBtn = document.getElementById('spinBtn');
+        const itemInput = document.getElementById('itemInput');
+        const addBtn = document.getElementById('addBtn');
+        const itemList = document.getElementById('itemList');
+        const itemCountSpan = document.getElementById('itemCount');
+        const resetBtn = document.getElementById('resetBtn');
+        const resultModal = document.getElementById('resultModal');
+        const modalContent = document.getElementById('modalContent');
+        const resultText = document.getElementById('resultText');
+        const closeModalBtn = document.getElementById('closeModalBtn');
+
+        // 預設與狀態
+        const defaultOptions = ['滷肉飯', '牛肉麵', '麥當勞', '炒飯', '披薩', '壽司', '火鍋', '便當', '義大利麵', '吃土'];
+        let options = [...defaultOptions];
+        
+        // 轉盤配色 (充滿食慾的暖色系)
+        const colors = [
+            '#FF6B6B', '#FF8E53', '#FFA07A', '#FDCB6E', 
+            '#FFEAA7', '#55E6C1', '#4ECDC4', '#45B7D1', 
+            '#6C5CE7', '#A8E6CF', '#FFD3B6', '#FFAAA5'
+        ];
+
+        let currentRotation = 0; // 當前旋轉角度 (弧度)
+        let isSpinning = false;
+        let animationFrameId;
+
+        // 初始化設定
+        function init() {
+            setupCanvas();
+            renderList();
+            drawWheel();
+            
+            // 視窗縮放時重新調整 Canvas 大小以保持清晰度
+            window.addEventListener('resize', () => {
+                setupCanvas();
+                drawWheel();
+            });
+        }
+
+        // 設定 Canvas 解析度 (支援 Retina 顯示器)
+        function setupCanvas() {
+            const size = canvas.parentElement.clientWidth;
+            const dpr = window.devicePixelRatio || 1;
+            
+            canvas.width = size * dpr;
+            canvas.height = size * dpr;
+            
+            ctx.scale(dpr, dpr);
+            
+            // 讓 CSS 控制實際顯示大小
+            canvas.style.width = size + 'px';
+            canvas.style.height = size + 'px';
+        }
+
+        // 繪製轉盤
+        function drawWheel() {
+            const size = canvas.clientWidth;
+            const centerX = size / 2;
+            const centerY = size / 2;
+            const radius = size / 2 - 10; // 留白邊距
+            
+            ctx.clearRect(0, 0, size, size);
+
+            if (options.length === 0) {
+                // 沒有選項時畫一個灰色的圓
+                ctx.beginPath();
+                ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
+                ctx.fillStyle = '#e5e7eb';
+                ctx.fill();
+                return;
+            }
+
+            const sliceAngle = (2 * Math.PI) / options.length;
+
+            for (let i = 0; i < options.length; i++) {
+                const startAngle = currentRotation + i * sliceAngle;
+                const endAngle = startAngle + sliceAngle;
+
+                // 畫扇形
+                ctx.beginPath();
+                ctx.moveTo(centerX, centerY);
+                ctx.arc(centerX, centerY, radius, startAngle, endAngle);
+                ctx.closePath();
+
+                ctx.fillStyle = colors[i % colors.length];
+                ctx.fill();
+                
+                // 畫分隔線
+                ctx.lineWidth = 2;
+                ctx.strokeStyle = '#ffffff';
+                ctx.stroke();
+
+                // 畫文字
+                ctx.save();
+                ctx.translate(centerX, centerY);
+                ctx.rotate(startAngle + sliceAngle / 2);
+                
+                ctx.textAlign = 'right';
+                ctx.textBaseline = 'middle';
+                ctx.fillStyle = '#ffffff';
+                
+                // 動態調整字體大小
+                const fontSize = Math.max(12, Math.min(24, (radius * Math.PI * 2 / options.length) / 3));
+                ctx.font = `bold ${fontSize}px 'Noto Sans TC', sans-serif`;
+                
+                // 加上文字陰影增加可讀性
+                ctx.shadowColor = 'rgba(0,0,0,0.3)';
+                ctx.shadowBlur = 4;
+                ctx.shadowOffsetX = 1;
+                ctx.shadowOffsetY = 1;
+
+                // 限制文字長度
+                const text = options[i].length > 8 ? options[i].substring(0, 8) + '...' : options[i];
+                ctx.fillText(text, radius - 20, 0);
+                
+                ctx.restore();
+            }
+
+            // 畫中間的內圈裝飾
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, radius * 0.15, 0, 2 * Math.PI);
+            ctx.fillStyle = '#ffffff';
+            ctx.fill();
+            ctx.shadowColor = 'transparent';
+        }
+
+        // 渲染右側清單
+        function renderList() {
+            itemList.innerHTML = '';
+            itemCountSpan.textContent = options.length;
+            
+            spinBtn.disabled = options.length < 2;
+
+            options.forEach((opt, index) => {
+                const li = document.createElement('li');
+                li.className = 'flex justify-between items-center bg-gray-50 border border-gray-100 p-3 rounded-xl hover:bg-orange-50 transition-colors group';
+                
+                // 圓點顏色對應轉盤
+                const dotColor = colors[index % colors.length];
+                
+                li.innerHTML = `
+                    <div class="flex items-center gap-3 overflow-hidden">
+                        <span class="w-3 h-3 rounded-full flex-shrink-0" style="background-color: ${dotColor}"></span>
+                        <span class="font-bold text-gray-700 truncate" title="${opt}">${opt}</span>
+                    </div>
+                    <button onclick="removeOption(${index})" class="text-gray-400 hover:text-red-500 focus:outline-none p-1 transition-colors opacity-100 lg:opacity-0 lg:group-hover:opacity-100" title="刪除">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                    </button>
+                `;
+                itemList.appendChild(li);
+            });
+        }
+
+        // 新增選項
+        function addOption() {
+            const val = itemInput.value.trim();
+            if (val) {
+                options.unshift(val); // 加在最上面
+                itemInput.value = '';
+                renderList();
+                drawWheel();
+            }
+        }
+
+        // 刪除選項 (暴露在全域供 onclick 使用)
+        window.removeOption = function(index) {
+            if (isSpinning) return;
+            options.splice(index, 1);
+            renderList();
+            drawWheel();
+        };
+
+        // 事件監聽：新增按鈕與 Enter 鍵
+        addBtn.addEventListener('click', addOption);
+        itemInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') addOption();
+        });
+
+        // 重置按鈕
+        resetBtn.addEventListener('click', () => {
+            if (isSpinning) return;
+            options = [...defaultOptions];
+            renderList();
+            currentRotation = 0;
+            drawWheel();
+        });
+
+        // 旋轉邏輯
+        function spin() {
+            if (isSpinning || options.length < 2) return;
+            
+            isSpinning = true;
+            spinBtn.disabled = true;
+            
+            // 隨機初始速度與旋轉時間
+            let spinVelocity = Math.random() * 0.15 + 0.3; 
+            const friction = 0.985; // 摩擦力 (減速係數)
+
+            function animate() {
+                currentRotation += spinVelocity;
+                spinVelocity *= friction;
+
+                drawWheel();
+
+                // 當速度低於某個閾值時停止
+                if (spinVelocity > 0.001) {
+                    animationFrameId = requestAnimationFrame(animate);
+                } else {
+                    isSpinning = false;
+                    spinBtn.disabled = false;
+                    determineWinner();
+                }
+            }
+            
+            cancelAnimationFrame(animationFrameId);
+            animate();
+        }
+
+        spinBtn.addEventListener('click', spin);
+
+        // 決定中獎者
+        function determineWinner() {
+            const sliceAngle = (2 * Math.PI) / options.length;
+            
+            // 將當前旋轉角度標準化到 0 ~ 2PI 之間
+            let normalizedRot = currentRotation % (2 * Math.PI);
+            if (normalizedRot < 0) normalizedRot += 2 * Math.PI;
+
+            // 指針在正上方 (即 270度 或 3PI/2)
+            const pointerAngle = 3 * Math.PI / 2;
+            
+            // 計算從當前角度到指針角度的距離
+            let diff = (pointerAngle - normalizedRot) % (2 * Math.PI);
+            if (diff < 0) diff += 2 * Math.PI;
+
+            // 判斷落入哪個區塊
+            const winnerIndex = Math.floor(diff / sliceAngle);
+            const winner = options[winnerIndex];
+
+            showModal(winner);
+        }
+
+        // 顯示結果 Modal 與灑紙片
+        function showModal(winner) {
+            resultText.textContent = winner;
+            
+            resultModal.classList.remove('hidden');
+            // 小延遲讓 display:block 生效後再加 opacity
+            setTimeout(() => {
+                resultModal.classList.remove('opacity-0');
+                modalContent.classList.remove('scale-90');
+                modalContent.classList.add('modal-animate');
+            }, 10);
+            
+            fireConfetti();
+        }
+
+        // 關閉 Modal
+        closeModalBtn.addEventListener('click', () => {
+            resultModal.classList.add('opacity-0');
+            modalContent.classList.add('scale-90');
+            modalContent.classList.remove('modal-animate');
+            
+            setTimeout(() => {
+                resultModal.classList.add('hidden');
+            }, 300); // 對應 transition-opacity 的時間
+        });
+
+        // 簡單的紙片(Confetti)特效函數
+        function fireConfetti() {
+            const confettiColors = ['#ef4444', '#f97316', '#f59e0b', '#10b981', '#3b82f6', '#8b5cf6', '#ec4899'];
+            const amount = 80;
+            
+            for (let i = 0; i < amount; i++) {
+                const confetti = document.createElement('div');
+                confetti.className = 'confetti';
+                
+                // 隨機屬性
+                const color = confettiColors[Math.floor(Math.random() * confettiColors.length)];
+                const left = Math.random() * 100 + 'vw';
+                const size = Math.random() * 8 + 6 + 'px';
+                const isCircle = Math.random() > 0.5;
+                
+                confetti.style.left = left;
+                confetti.style.top = '-20px';
+                confetti.style.width = size;
+                confetti.style.height = size;
+                confetti.style.backgroundColor = color;
+                if (isCircle) confetti.style.borderRadius = '50%';
+                
+                document.body.appendChild(confetti);
+
+                // 動畫參數
+                const duration = Math.random() * 1500 + 1500; // 1.5s - 3s
+                const xMovement = (Math.random() - 0.5) * 300; // 水平飄移
+                const yMovement = window.innerHeight + 100;
+                const rotation = Math.random() * 720;
+
+                const animation = confetti.animate([
+                    { transform: `translate3d(0, 0, 0) rotate(0deg)`, opacity: 1 },
+                    { transform: `translate3d(${xMovement}px, ${yMovement}px, 0) rotate(${rotation}deg)`, opacity: 0 }
+                ], {
+                    duration: duration,
+                    easing: 'cubic-bezier(.37,0,.63,1)'
+                });
+
+                // 動畫結束後移除元素
+                animation.onfinish = () => confetti.remove();
+            }
+        }
+
+        // 啟動
+        init();
+
+    </script>
+</body>
+</html>
